@@ -1,19 +1,50 @@
-// 密码保护功能
+// 密码保护功能 - 兼容 Netlify 和 Vercel
+
+/**
+ * 获取密码哈希 - 支持多种环境变量来源
+ */
+function getPasswordHash() {
+    // 方法1: 从 window.__ENV__ 获取 (Vercel 常用)
+    if (window.__ENV__ && window.__ENV__.PASSWORD) {
+        return window.__ENV__.PASSWORD;
+    }
+    
+    // 方法2: 从 process.env 获取 (构建时注入)
+    if (typeof process !== 'undefined' && process.env && process.env.PASSWORD) {
+        return process.env.PASSWORD;
+    }
+    
+    // 方法3: 从全局变量获取 (手动注入)
+    if (window.SITE_PASSWORD) {
+        return window.SITE_PASSWORD;
+    }
+    
+    // 方法4: 从 meta 标签获取
+    const metaTag = document.querySelector('meta[name="site-password"]');
+    if (metaTag) {
+        return metaTag.getAttribute('content');
+    }
+    
+    // 方法5: 从 localStorage 获取预设值 (开发调试用)
+    const localPassword = localStorage.getItem('__DEBUG_PASSWORD_HASH__');
+    if (localPassword && localPassword.length === 64) {
+        return localPassword;
+    }
+    
+    return null;
+}
 
 /**
  * 检查是否设置了密码保护
- * 通过读取页面上嵌入的环境变量来检查
  */
 function isPasswordProtected() {
-    // 检查页面上嵌入的环境变量
-    const pwd = window.__ENV__ && window.__ENV__.PASSWORD;
+    const pwd = getPasswordHash();
     // 只有当密码 hash 存在且为64位（SHA-256十六进制长度）才认为启用密码保护
     return typeof pwd === 'string' && pwd.length === 64 && !/^0+$/.test(pwd);
 }
 
 /**
  * 检查用户是否已通过密码验证
- * 检查localStorage中的验证状态和时间戳是否有效，并确认密码哈希未更改
  */
 function isPasswordVerified() {
     try {
@@ -26,7 +57,7 @@ function isPasswordVerified() {
         const { verified, timestamp, passwordHash } = verificationData;
         
         // 获取当前环境中的密码哈希
-        const currentHash = window.__ENV__ && window.__ENV__.PASSWORD;
+        const currentHash = getPasswordHash();
         
         // 验证是否已验证、未过期，且密码哈希未更改
         if (verified && timestamp && passwordHash === currentHash) {
@@ -49,10 +80,12 @@ window.isPasswordVerified = isPasswordVerified;
  * 验证用户输入的密码是否正确（异步，使用SHA-256哈希）
  */
 async function verifyPassword(password) {
-    const correctHash = window.__ENV__ && window.__ENV__.PASSWORD;
+    const correctHash = getPasswordHash();
     if (!correctHash) return false;
+    
     const inputHash = await sha256(password);
     const isValid = inputHash === correctHash;
+    
     if (isValid) {
         const verificationData = {
             verified: true,
@@ -158,9 +191,32 @@ async function handlePasswordSubmit() {
 }
 
 /**
+ * 调试函数 - 检查环境变量状态
+ */
+function debugPasswordEnvironment() {
+    console.log('=== 密码保护调试信息 ===');
+    console.log('window.__ENV__:', window.__ENV__);
+    console.log('process.env (if available):', typeof process !== 'undefined' ? process.env : 'N/A');
+    console.log('window.SITE_PASSWORD:', window.SITE_PASSWORD);
+    console.log('Meta tag password:', document.querySelector('meta[name="site-password"]')?.getAttribute('content'));
+    console.log('当前获取的密码哈希:', getPasswordHash());
+    console.log('是否启用密码保护:', isPasswordProtected());
+    console.log('是否已验证:', isPasswordVerified());
+    console.log('========================');
+}
+
+// 添加到全局，方便调试
+window.debugPasswordEnvironment = debugPasswordEnvironment;
+
+/**
  * 初始化密码验证系统（需适配异步事件）
  */
 function initPasswordProtection() {
+    // 调试模式下输出环境信息
+    if (localStorage.getItem('__DEBUG_PASSWORD__') === 'true') {
+        debugPasswordEnvironment();
+    }
+    
     if (!isPasswordProtected()) {
         return; // 如果未设置密码保护，则不进行任何操作
     }
