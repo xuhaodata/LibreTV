@@ -1,36 +1,42 @@
-// 密码保护功能 - 兼容 Netlify 和 Vercel
+// 兼容 Netlify 的密码保护功能
 
 /**
  * 获取密码哈希 - 支持多种环境变量来源
  */
 function getPasswordHash() {
-    // 方法1: 从 window.__ENV__ 获取 (Vercel 常用)
+    // 方法1: 从 window.__ENV__ 获取 (Vercel/Docker)
     if (window.__ENV__ && window.__ENV__.PASSWORD) {
+        console.log('从 window.__ENV__ 获取密码');
         return window.__ENV__.PASSWORD;
     }
     
-    // 方法2: 从 process.env 获取 (构建时注入)
-    if (typeof process !== 'undefined' && process.env && process.env.PASSWORD) {
-        return process.env.PASSWORD;
+    // 方法2: 从全局变量获取 (Netlify 注入)
+    if (window.NETLIFY_PASSWORD) {
+        console.log('从 window.NETLIFY_PASSWORD 获取密码');
+        return window.NETLIFY_PASSWORD;
     }
     
-    // 方法3: 从全局变量获取 (手动注入)
-    if (window.SITE_PASSWORD) {
-        return window.SITE_PASSWORD;
-    }
-    
-    // 方法4: 从 meta 标签获取
+    // 方法3: 从 meta 标签获取 (手动注入)
     const metaTag = document.querySelector('meta[name="site-password"]');
     if (metaTag) {
+        console.log('从 meta 标签获取密码');
         return metaTag.getAttribute('content');
     }
     
-    // 方法5: 从 localStorage 获取预设值 (开发调试用)
-    const localPassword = localStorage.getItem('__DEBUG_PASSWORD_HASH__');
-    if (localPassword && localPassword.length === 64) {
-        return localPassword;
+    // 方法4: 从 data 属性获取
+    const bodyPassword = document.body.getAttribute('data-password');
+    if (bodyPassword) {
+        console.log('从 body data-password 获取密码');
+        return bodyPassword;
     }
     
+    // 方法5: 尝试从构建时注入的脚本获取
+    if (window.BUILD_TIME_PASSWORD) {
+        console.log('从构建时注入获取密码');
+        return window.BUILD_TIME_PASSWORD;
+    }
+    
+    console.log('未找到密码配置');
     return null;
 }
 
@@ -39,8 +45,9 @@ function getPasswordHash() {
  */
 function isPasswordProtected() {
     const pwd = getPasswordHash();
-    // 只有当密码 hash 存在且为64位（SHA-256十六进制长度）才认为启用密码保护
-    return typeof pwd === 'string' && pwd.length === 64 && !/^0+$/.test(pwd);
+    const isProtected = typeof pwd === 'string' && pwd.length === 64 && !/^0+$/.test(pwd);
+    console.log('密码保护状态:', isProtected, '密码长度:', pwd ? pwd.length : 0);
+    return isProtected;
 }
 
 /**
@@ -72,6 +79,29 @@ function isPasswordVerified() {
         return false;
     }
 }
+
+// 在页面加载时尝试从多个来源获取密码
+document.addEventListener('DOMContentLoaded', function() {
+    // 尝试从 Netlify 构建时注入的环境变量获取密码
+    // 这需要在构建脚本中设置
+    
+    // 检查是否有通过 URL 参数传递的密码（仅用于调试）
+    const urlParams = new URLSearchParams(window.location.search);
+    const debugPassword = urlParams.get('debug_password');
+    if (debugPassword && debugPassword.length === 64) {
+        window.NETLIFY_PASSWORD = debugPassword;
+        console.log('使用调试密码');
+    }
+    
+    // 调试信息
+    console.log('=== 密码保护调试信息 ===');
+    console.log('window.__ENV__:', window.__ENV__);
+    console.log('window.NETLIFY_PASSWORD:', window.NETLIFY_PASSWORD);
+    console.log('当前获取的密码哈希:', getPasswordHash());
+    console.log('是否启用密码保护:', isPasswordProtected());
+    console.log('是否已验证:', isPasswordVerified());
+    console.log('========================');
+});
 
 window.isPasswordProtected = isPasswordProtected;
 window.isPasswordVerified = isPasswordVerified;
@@ -119,7 +149,10 @@ function showPasswordModal() {
     const passwordModal = document.getElementById('passwordModal');
     if (passwordModal) {
         // 防止出现豆瓣区域滚动条
-        document.getElementById('doubanArea').classList.add('hidden');
+        const doubanArea = document.getElementById('doubanArea');
+        if (doubanArea) {
+            doubanArea.classList.add('hidden');
+        }
 
         passwordModal.style.display = 'flex';
         
@@ -143,8 +176,13 @@ function hidePasswordModal() {
 
         // 如果启用豆瓣区域则显示豆瓣区域
         if (localStorage.getItem('doubanEnabled') === 'true') {
-            document.getElementById('doubanArea').classList.remove('hidden');
-            initDouban();
+            const doubanArea = document.getElementById('doubanArea');
+            if (doubanArea) {
+                doubanArea.classList.remove('hidden');
+                if (typeof initDouban === 'function') {
+                    initDouban();
+                }
+            }
         }
     }
 }
@@ -191,38 +229,21 @@ async function handlePasswordSubmit() {
 }
 
 /**
- * 调试函数 - 检查环境变量状态
- */
-function debugPasswordEnvironment() {
-    console.log('=== 密码保护调试信息 ===');
-    console.log('window.__ENV__:', window.__ENV__);
-    console.log('process.env (if available):', typeof process !== 'undefined' ? process.env : 'N/A');
-    console.log('window.SITE_PASSWORD:', window.SITE_PASSWORD);
-    console.log('Meta tag password:', document.querySelector('meta[name="site-password"]')?.getAttribute('content'));
-    console.log('当前获取的密码哈希:', getPasswordHash());
-    console.log('是否启用密码保护:', isPasswordProtected());
-    console.log('是否已验证:', isPasswordVerified());
-    console.log('========================');
-}
-
-// 添加到全局，方便调试
-window.debugPasswordEnvironment = debugPasswordEnvironment;
-
-/**
  * 初始化密码验证系统（需适配异步事件）
  */
 function initPasswordProtection() {
-    // 调试模式下输出环境信息
-    if (localStorage.getItem('__DEBUG_PASSWORD__') === 'true') {
-        debugPasswordEnvironment();
-    }
+    console.log('初始化密码保护系统');
     
     if (!isPasswordProtected()) {
+        console.log('未启用密码保护');
         return; // 如果未设置密码保护，则不进行任何操作
     }
     
+    console.log('密码保护已启用');
+    
     // 如果未验证密码，则显示密码验证弹窗
     if (!isPasswordVerified()) {
+        console.log('显示密码验证弹窗');
         showPasswordModal();
         
         // 设置密码提交按钮事件监听
@@ -240,6 +261,8 @@ function initPasswordProtection() {
                 }
             });
         }
+    } else {
+        console.log('密码已验证');
     }
 }
 
