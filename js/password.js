@@ -1,4 +1,4 @@
-// 兼容 Netlify 的密码保护功能
+// 兼容 Netlify 的密码保护功能; 新增NETLIFY_PASSWORD
 
 /**
  * 获取密码哈希 - 支持多种环境变量来源
